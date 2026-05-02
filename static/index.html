@@ -1,0 +1,856 @@
+﻿
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>HW CTF :: Terminal Access</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Share+Tech+Mono&display=swap');
+
+    :root {
+      --green: #00ff41;
+      --green-dim: #00cc33;
+      --green-dark: #003311;
+      --bg: #0a0a0a;
+      --panel: #0d0d0d;
+      --border: #1a3a1a;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      background: var(--bg);
+      color: var(--green);
+      font-family: 'Share Tech Mono', 'Courier New', monospace;
+      overflow: hidden;
+      height: 100vh;
+    }
+
+    /* Scanline overlay */
+    body::before {
+      content: '';
+      position: fixed;
+      inset: 0;
+      background: repeating-linear-gradient(
+        0deg,
+        transparent,
+        transparent 2px,
+        rgba(0,255,65,0.015) 2px,
+        rgba(0,255,65,0.015) 4px
+      );
+      pointer-events: none;
+      z-index: 9999;
+    }
+
+    /* CRT flicker */
+    @keyframes flicker {
+      0%,100% { opacity: 1; }
+      92% { opacity: 1; }
+      93% { opacity: 0.85; }
+      94% { opacity: 1; }
+      96% { opacity: 0.9; }
+      97% { opacity: 1; }
+    }
+    body { animation: flicker 8s infinite; }
+
+    /* Glow text */
+    .glow {
+      text-shadow: 0 0 8px var(--green), 0 0 20px var(--green-dim);
+    }
+    .glow-sm {
+      text-shadow: 0 0 4px var(--green);
+    }
+
+    /* Sidebar */
+    #sidebar {
+      background: var(--panel);
+      border-right: 1px solid var(--border);
+      width: 220px;
+      min-width: 220px;
+    }
+
+    .nav-item {
+      padding: 10px 16px;
+      cursor: pointer;
+      border-left: 3px solid transparent;
+      transition: all 0.15s;
+      font-size: 0.85rem;
+      letter-spacing: 0.05em;
+    }
+    .nav-item:hover {
+      background: rgba(0,255,65,0.07);
+      border-left-color: var(--green-dim);
+      color: #fff;
+    }
+    .nav-item.active {
+      background: rgba(0,255,65,0.12);
+      border-left-color: var(--green);
+      color: var(--green);
+      text-shadow: 0 0 6px var(--green);
+    }
+
+    /* Main panel */
+    #main {
+      flex: 1;
+      overflow-y: auto;
+      padding: 28px 36px;
+      background: var(--bg);
+    }
+
+    /* Cards */
+    .card {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      padding: 18px 22px;
+      margin-bottom: 16px;
+    }
+    .card:hover {
+      border-color: var(--green-dim);
+      box-shadow: 0 0 12px rgba(0,255,65,0.08);
+    }
+
+    /* Inputs */
+    input[type=text], input[type=password] {
+      background: #050505;
+      border: 1px solid var(--border);
+      color: var(--green);
+      font-family: inherit;
+      padding: 8px 12px;
+      width: 100%;
+      outline: none;
+      border-radius: 2px;
+      font-size: 0.9rem;
+    }
+    input[type=text]:focus, input[type=password]:focus {
+      border-color: var(--green-dim);
+      box-shadow: 0 0 8px rgba(0,255,65,0.15);
+    }
+
+    /* Buttons */
+    .btn {
+      background: transparent;
+      border: 1px solid var(--green-dim);
+      color: var(--green);
+      font-family: inherit;
+      padding: 8px 18px;
+      cursor: pointer;
+      font-size: 0.85rem;
+      letter-spacing: 0.08em;
+      transition: all 0.15s;
+      border-radius: 2px;
+    }
+    .btn:hover {
+      background: rgba(0,255,65,0.1);
+      box-shadow: 0 0 10px rgba(0,255,65,0.2);
+    }
+    .btn-fake {
+      border-color: #333;
+      color: #555;
+    }
+    .btn-fake:hover {
+      background: rgba(255,0,0,0.05);
+      border-color: #550000;
+      color: #ff3333;
+    }
+
+    /* Terminal output box */
+    .terminal-out {
+      background: #050505;
+      border: 1px solid var(--border);
+      border-radius: 2px;
+      padding: 14px;
+      font-size: 0.82rem;
+      min-height: 60px;
+      white-space: pre-wrap;
+      word-break: break-all;
+      color: #aaffaa;
+      margin-top: 10px;
+    }
+
+    /* Typing cursor */
+    @keyframes blink { 0%,100%{opacity:1} 50%{opacity:0} }
+    .cursor::after {
+      content: '█';
+      animation: blink 1s infinite;
+      color: var(--green);
+    }
+
+    /* Badge */
+    .badge {
+      display: inline-block;
+      padding: 2px 8px;
+      border: 1px solid var(--green-dim);
+      font-size: 0.7rem;
+      border-radius: 2px;
+      color: var(--green-dim);
+    }
+    .badge-red {
+      border-color: #550000;
+      color: #ff4444;
+    }
+    .badge-yellow {
+      border-color: #554400;
+      color: #ffaa00;
+    }
+
+    /* Port scan row */
+    .port-row {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 8px 0;
+      border-bottom: 1px solid #111;
+      font-size: 0.83rem;
+    }
+    .port-open { color: var(--green); }
+    .port-closed { color: #333; }
+    .port-highlight {
+      color: var(--green);
+      text-shadow: 0 0 8px var(--green);
+    }
+
+    /* Encoded string card */
+    .enc-card {
+      background: #050505;
+      border: 1px solid #1a2a1a;
+      border-radius: 3px;
+      padding: 14px;
+      margin-bottom: 10px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+    .enc-id {
+      font-size: 1.1rem;
+      font-weight: bold;
+      color: var(--green);
+      min-width: 24px;
+    }
+    .enc-val {
+      flex: 1;
+      font-size: 0.78rem;
+      color: #88cc88;
+      word-break: break-all;
+    }
+
+    /* JWT display */
+    .jwt-part { display: inline; }
+    .jwt-header { color: #ff6b6b; }
+    .jwt-payload { color: #ffd93d; }
+    .jwt-sig { color: #6bcb77; }
+
+    /* Scrollbar */
+    ::-webkit-scrollbar { width: 6px; }
+    ::-webkit-scrollbar-track { background: #050505; }
+    ::-webkit-scrollbar-thumb { background: #1a3a1a; border-radius: 3px; }
+    ::-webkit-scrollbar-thumb:hover { background: var(--green-dim); }
+
+    /* Section title */
+    .section-title {
+      font-size: 1.1rem;
+      letter-spacing: 0.15em;
+      text-transform: uppercase;
+      margin-bottom: 20px;
+      padding-bottom: 8px;
+      border-bottom: 1px solid var(--border);
+    }
+
+    /* Pulse dot */
+    @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.3} }
+    .pulse-dot {
+      display: inline-block;
+      width: 8px; height: 8px;
+      background: var(--green);
+      border-radius: 50%;
+      animation: pulse 1.5s infinite;
+      box-shadow: 0 0 6px var(--green);
+    }
+
+    /* Hidden hint (visible in page source / devtools) */
+    /* HINT: The /fetch endpoint accepts any URL. Internal services are interesting. */
+    /* HINT: JWT secret is short. Brute force is an option. */
+    /* HINT: alg:none is a valid JWT algorithm... for some implementations. */
+    /* HINT: PUT /final with the right headers, cookie, and JWT wins the game. */
+  </style>
+</head>
+<body class="flex h-screen">
+
+<!-- ═══════════════════════════════════════════ SIDEBAR ══ -->
+<aside id="sidebar" class="flex flex-col">
+  <div class="p-4 border-b border-green-900">
+    <div class="glow text-lg font-bold tracking-widest">HW::CTF</div>
+    <div class="text-xs text-green-700 mt-1">v2.4.1-beta // SECURE TERMINAL</div>
+  </div>
+
+  <nav class="flex-1 py-4">
+    <div class="px-4 mb-2 text-xs text-green-800 tracking-widest uppercase">Navigation</div>
+    <div class="nav-item active" onclick="showPage('login')"    id="nav-login">    [01] Login</div>
+    <div class="nav-item"        onclick="showPage('crypto')"   id="nav-crypto">   [02] Crypto Lab</div>
+    <div class="nav-item"        onclick="showPage('recon')"    id="nav-recon">    [03] Recon</div>
+    <div class="nav-item"        onclick="showPage('fetch')"    id="nav-fetch">    [04] Fetch Tool</div>
+    <div class="nav-item"        onclick="showPage('jwt')"      id="nav-jwt">      [05] JWT Dashboard</div>
+    <div class="nav-item"        onclick="showPage('final')"    id="nav-final">    [06] Final Stage</div>
+  </nav>
+
+  <div class="p-4 border-t border-green-900 text-xs text-green-800">
+    <div>TARGET: 127.0.0.1</div>
+    <div>PORT: 5000</div>
+    <div class="mt-1 flex items-center gap-2">
+      <span class="pulse-dot"></span>
+      <span>CONNECTED</span>
+    </div>
+  </div>
+</aside>
+
+<!-- ═══════════════════════════════════════════ MAIN ══════ -->
+<main id="main">
+
+  <!-- ── PAGE: LOGIN ─────────────────────────────────────── -->
+  <section id="page-login" class="page">
+    <div class="section-title glow-sm">[ Stage 01 :: Authentication ]</div>
+
+    <div class="card">
+      <div class="text-xs text-green-700 mb-4">
+        <!-- SQL comment visible in source: SELECT * FROM users WHERE username='?' AND password='?' -->
+        System requires valid credentials. Authentication module active.
+      </div>
+
+      <div class="mb-3">
+        <label class="text-xs text-green-700 block mb-1">USERNAME</label>
+        <input type="text" id="login-user" placeholder="enter username..." />
+      </div>
+      <div class="mb-4">
+        <label class="text-xs text-green-700 block mb-1">PASSWORD</label>
+        <input type="password" id="login-pass" placeholder="enter password..." />
+      </div>
+
+      <div class="flex gap-3 flex-wrap">
+        <button class="btn" onclick="doLogin()">[ AUTHENTICATE ]</button>
+        <button class="btn btn-fake" onclick="fakeLogin()">[ BYPASS (SQLi?) ]</button>
+      </div>
+
+      <div class="terminal-out cursor" id="login-out">Awaiting input...</div>
+    </div>
+
+    <div class="card">
+      <div class="text-xs text-green-700 mb-2 uppercase tracking-widest">// Hints</div>
+      <div class="text-xs text-green-800 mb-1">
+        &gt; FAKE: Try SQL injection — <span class="text-red-700">' OR '1'='1</span>
+      </div>
+      <div class="text-xs text-green-600">
+        &gt; REAL: Think about what the server actually checks in the username field.
+      </div>
+    </div>
+  </section>
+
+  <!-- ── PAGE: CRYPTO ────────────────────────────────────── -->
+  <section id="page-crypto" class="page hidden">
+    <div class="section-title glow-sm">[ Stage 02 :: Cryptographic Analysis ]</div>
+
+    <div class="card">
+      <div class="text-xs text-green-700 mb-4">
+        The server returns multiple encoded strings. One contains the real fragment.
+        Encoding type is not disclosed. Decode them all and identify the signal.
+      </div>
+      <button class="btn" onclick="fetchCrypto()">[ FETCH ENCODED STRINGS ]</button>
+      <div id="crypto-cards" class="mt-4"></div>
+    </div>
+
+    <div class="card">
+      <div class="text-xs text-green-700 mb-2 uppercase tracking-widest">// Decoder Utility</div>
+      <input type="text" id="decode-input" placeholder="paste encoded string here..." class="mb-2" />
+      <div class="flex gap-2 flex-wrap mt-2">
+        <button class="btn" onclick="tryDecode('b64')">Base64</button>
+        <button class="btn" onclick="tryDecode('hex')">Hex</button>
+        <button class="btn" onclick="tryDecode('rot13')">ROT13</button>
+        <button class="btn btn-fake" onclick="tryDecode('double')">Double-B64</button>
+      </div>
+      <div class="terminal-out" id="decode-out">Decode output will appear here...</div>
+    </div>
+  </section>
+
+  <!-- ── PAGE: RECON ─────────────────────────────────────── -->
+  <section id="page-recon" class="page hidden">
+    <div class="section-title glow-sm">[ Stage 03 :: Network Reconnaissance ]</div>
+
+    <div class="card">
+      <div class="text-xs text-green-700 mb-3">
+        Simulated port scan results for 127.0.0.1. Run your own Nmap scan to verify.
+      </div>
+      <div class="text-xs text-green-800 mb-4 font-bold">
+        $ nmap -sV -p 1-10000 127.0.0.1
+      </div>
+
+      <div id="scan-output" class="terminal-out">
+        <span class="text-green-700">Initializing scan...</span>
+      </div>
+      <button class="btn mt-3" onclick="runFakeScan()">[ RUN SCAN ]</button>
+    </div>
+
+    <div class="card">
+      <div class="text-xs text-green-700 mb-2 uppercase tracking-widest">// Discovered Services</div>
+      <div id="service-list"></div>
+      <div class="text-xs text-green-800 mt-3">
+        &gt; HINT: Not all services are listed here. Run a real Nmap scan.
+        <!-- HINT: There is an internal service path. Try /internal-svc/internal via the fetch tool. -->
+      </div>
+    </div>
+  </section>
+
+  <!-- ── PAGE: FETCH TOOL ────────────────────────────────── -->
+  <section id="page-fetch" class="page hidden">
+    <div class="section-title glow-sm">[ Stage 04 :: Server-Side Request Utility ]</div>
+
+    <div class="card">
+      <div class="text-xs text-green-700 mb-4">
+        This tool fetches remote URLs via the server. Useful for testing external APIs.
+      </div>
+      <label class="text-xs text-green-700 block mb-1">TARGET URL</label>
+      <input type="text" id="fetch-url" placeholder="Try external APIs... e.g. http://httpbin.org/get" class="mb-3" />
+      <div class="flex gap-3 flex-wrap">
+        <button class="btn" onclick="doFetch()">[ SEND REQUEST ]</button>
+        <button class="btn btn-fake" onclick="fetchFake()">[ SCAN INTERNAL (fake) ]</button>
+      </div>
+      <div class="terminal-out cursor" id="fetch-out">Response will appear here...</div>
+    </div>
+
+    <div class="card">
+      <div class="text-xs text-green-700 mb-2 uppercase tracking-widest">// Notes</div>
+      <div class="text-xs text-green-800">
+        &gt; The fetch utility passes your URL directly to the server.<br/>
+        &gt; External APIs only. Internal network access is <span class="text-red-700">strictly prohibited</span>.<br/>
+        &gt; <span class="text-green-600">// TODO: add URL validation before v3 release</span>
+      </div>
+    </div>
+  </section>
+
+  <!-- ── PAGE: JWT DASHBOARD ─────────────────────────────── -->
+  <section id="page-jwt" class="page hidden">
+    <div class="section-title glow-sm">[ Stage 05 :: JWT Authentication ]</div>
+
+    <div class="card">
+      <div class="text-xs text-green-700 mb-4">
+        Request a session token. Tokens are cryptographically signed and tamper-proof.
+      </div>
+      <div class="flex gap-3 flex-wrap">
+        <button class="btn" onclick="getToken()">[ GET TOKEN ]</button>
+        <button class="btn btn-fake" onclick="fakeVerify()">[ VERIFY (admin?) ]</button>
+      </div>
+      <div class="terminal-out" id="jwt-raw-out">Token will appear here...</div>
+    </div>
+
+    <div class="card" id="jwt-visual-card" style="display:none">
+      <div class="text-xs text-green-700 mb-2 uppercase tracking-widest">// Token Structure</div>
+      <div class="text-sm break-all leading-6" id="jwt-visual"></div>
+      <div class="mt-3 text-xs text-green-800">
+        <span class="jwt-header">■ Header</span> &nbsp;
+        <span class="jwt-payload">■ Payload</span> &nbsp;
+        <span class="jwt-sig">■ Signature</span>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="text-xs text-green-700 mb-2 uppercase tracking-widest">// Verify Token</div>
+      <input type="text" id="jwt-verify-input" placeholder="paste JWT here..." class="mb-2" />
+      <button class="btn" onclick="verifyToken()">[ VERIFY ]</button>
+      <div class="terminal-out" id="jwt-verify-out">Verification result...</div>
+    </div>
+  </section>
+
+  <!-- ── PAGE: FINAL ─────────────────────────────────────── -->
+  <section id="page-final" class="page hidden">
+    <div class="section-title glow-sm">[ Stage 06 :: Final Extraction ]</div>
+
+    <div class="card">
+      <div class="text-xs text-green-700 mb-4">
+        The final flag fragment is locked behind the <code class="text-green-400">/final</code> endpoint.
+        All previous stage fragments must be assembled.
+      </div>
+
+      <div class="mb-4">
+        <div class="text-xs text-green-700 mb-2">Collected Fragments:</div>
+        <div class="flex flex-wrap gap-2" id="fragment-list">
+          <span class="badge">Part1: ???</span>
+          <span class="badge">Part2: ???</span>
+          <span class="badge">Part3: ???</span>
+          <span class="badge">Part4: ???</span>
+          <span class="badge">Part5: ???</span>
+        </div>
+      </div>
+
+      <div class="flex gap-3 flex-wrap">
+        <button class="btn btn-fake" onclick="fakeFlagReveal()">[ REVEAL FLAG (easy mode) ]</button>
+        <button class="btn btn-fake" onclick="fakeFinalTest()">[ TRY /final-test ]</button>
+        <button class="btn" onclick="tryFinalReal()">[ ATTEMPT /final ]</button>
+      </div>
+      <div class="terminal-out cursor" id="final-out">Awaiting final request...</div>
+    </div>
+
+    <div class="card">
+      <div class="text-xs text-green-700 mb-2 uppercase tracking-widest">// Requirements Checklist</div>
+      <div class="text-xs space-y-1 text-green-800">
+        <div>&gt; HTTP Method: <span class="text-yellow-600">???</span></div>
+        <div>&gt; Header X-Forwarded-For: <span class="text-yellow-600">???</span></div>
+        <div>&gt; Header X-Admin: <span class="text-yellow-600">???</span></div>
+        <div>&gt; Cookie role: <span class="text-yellow-600">???</span></div>
+        <div>&gt; JWT role: <span class="text-yellow-600">???</span></div>
+        <div class="mt-2 text-green-700">&gt; Use Burp Suite to craft the exact request.</div>
+      </div>
+    </div>
+  </section>
+
+</main>
+
+</body>
+
+<script>
+// ═══════════════════════════════════════════════════════════════
+//  HW CTF — Frontend Logic
+//  Hidden hints are scattered throughout this file.
+//  Read carefully.
+// ═══════════════════════════════════════════════════════════════
+
+// Fake security reassurance
+console.log("%c[SECURITY] JWT tokens are cryptographically secure and cannot be modified.", "color:#00ff41");
+console.log("%c[SECURITY] Server-side request validation is enforced.", "color:#00ff41");
+console.log("%c[SECURITY] All endpoints require proper authentication.", "color:#00ff41");
+
+// Real hints (subtle)
+console.log("%c[DEBUG] Tokens can be modified if you understand the structure.", "color:#005500; font-size:10px");
+console.log("%c[DEBUG] Headers define identity. The server trusts what you send.", "color:#005500; font-size:10px");
+console.log("%c[DEBUG] Internal services don't always need external exposure.", "color:#005500; font-size:10px");
+
+// Hidden base64 message in JS (decode me)
+// atob("VGhlIHJlYWwgZmxhZyBpcyBhc3NlbWJsZWQgZnJvbSA1IHBhcnRzLiBDaGVjayBldmVyeSByZXNwb25zZSBjYXJlZnVsbHku")
+// Hint: PUT /final — method matters. So do headers. So does your cookie. So does your JWT.
+
+// ── Navigation ──────────────────────────────────────────────────
+function showPage(name) {
+  document.querySelectorAll('.page').forEach(p => p.classList.add('hidden'));
+  document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+  document.getElementById('page-' + name).classList.remove('hidden');
+  document.getElementById('nav-' + name).classList.add('active');
+}
+
+// ── Typing effect ───────────────────────────────────────────────
+function typeOut(el, text, speed = 18) {
+  el.textContent = '';
+  el.classList.add('cursor');
+  let i = 0;
+  const iv = setInterval(() => {
+    el.textContent += text[i++];
+    if (i >= text.length) { clearInterval(iv); el.classList.remove('cursor'); }
+  }, speed);
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  STAGE 1 — LOGIN
+// ═══════════════════════════════════════════════════════════════
+async function doLogin() {
+  const user = document.getElementById('login-user').value.trim();
+  const pass = document.getElementById('login-pass').value.trim();
+  const out  = document.getElementById('login-out');
+
+  out.textContent = '> Sending credentials...';
+  try {
+    const r = await fetch('/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({ username: user, password: pass })
+    });
+    const d = await r.json();
+    const txt = JSON.stringify(d, null, 2);
+    typeOut(out, txt, 12);
+    if (d.token_hint) {
+      console.log('%c[STAGE 1] ' + d.token_hint, 'color:#00ff41; font-weight:bold');
+    }
+  } catch(e) {
+    out.textContent = '> Error: ' + e.message;
+  }
+}
+
+function fakeLogin() {
+  const out = document.getElementById('login-out');
+  typeOut(out, '> Trying SQL injection...\n> Error: syntax error near unexpected token\n> Hint: Maybe the check isn\'t SQL at all...', 14);
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  STAGE 2 — CRYPTO
+// ═══════════════════════════════════════════════════════════════
+async function fetchCrypto() {
+  const container = document.getElementById('crypto-cards');
+  container.innerHTML = '<div class="text-xs text-green-700">Fetching...</div>';
+  try {
+    const r = await fetch('/crypto');
+    const d = await r.json();
+    container.innerHTML = '';
+    d.encoded_strings.forEach(s => {
+      const div = document.createElement('div');
+      div.className = 'enc-card';
+      div.innerHTML = `
+        <span class="enc-id">[${s.id}]</span>
+        <span class="enc-val">${s.value}</span>
+        <button class="btn text-xs" style="padding:4px 10px" onclick="copyToDecoder('${s.value}')">USE</button>
+      `;
+      container.appendChild(div);
+    });
+    console.log('%c[STAGE 2] Encoded strings loaded. One is base64. One is real.', 'color:#005500; font-size:10px');
+  } catch(e) {
+    container.innerHTML = '<div class="text-red-700">Error: ' + e.message + '</div>';
+  }
+}
+
+function copyToDecoder(val) {
+  document.getElementById('decode-input').value = val;
+}
+
+function tryDecode(method) {
+  const input = document.getElementById('decode-input').value.trim();
+  const out   = document.getElementById('decode-out');
+  if (!input) { out.textContent = 'No input provided.'; return; }
+
+  try {
+    let result = '';
+    if (method === 'b64') {
+      result = atob(input);
+    } else if (method === 'hex') {
+      result = input.match(/.{1,2}/g).map(b => String.fromCharCode(parseInt(b, 16))).join('');
+    } else if (method === 'rot13') {
+      result = input.replace(/[a-zA-Z]/g, c =>
+        String.fromCharCode(c.charCodeAt(0) + (c.toLowerCase() < 'n' ? 13 : -13))
+      );
+    } else if (method === 'double') {
+      result = atob(atob(input));
+    }
+    out.textContent = '> Decoded: ' + result;
+  } catch(e) {
+    out.textContent = '> Decode failed: ' + e.message + '\n> Try a different method.';
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  STAGE 3 — RECON
+// ═══════════════════════════════════════════════════════════════
+function runFakeScan() {
+  const out = document.getElementById('scan-output');
+  const services = document.getElementById('service-list');
+
+  const lines = [
+    'Starting Nmap 7.94 ( https://nmap.org )',
+    'Nmap scan report for 127.0.0.1',
+    'Host is up (0.000089s latency).',
+    '',
+    'PORT     STATE  SERVICE    VERSION',
+    '5000/tcp open   http       Flask/3.0',
+    '8000/tcp open   http       SimpleHTTP (fake)',
+    '9000/tcp open   unknown    ???',
+    '????/tcp open   http       Flask/3.0  ← internal-api (hidden path)',
+    '',
+    'Nmap done: 1 IP address (1 host up) scanned',
+  ];
+
+  out.textContent = '';
+  let i = 0;
+  const iv = setInterval(() => {
+    if (i < lines.length) {
+      out.textContent += lines[i] + '\n';
+      i++;
+    } else {
+      clearInterval(iv);
+      renderServices();
+    }
+  }, 120);
+
+  function renderServices() {
+    services.innerHTML = `
+      <div class="port-row">
+        <span class="port-open">5000/tcp</span>
+        <span class="badge">OPEN</span>
+        <span class="text-green-700">http — Main App (you are here)</span>
+      </div>
+      <div class="port-row">
+        <span class="port-closed">8000/tcp</span>
+        <span class="badge badge-red">OPEN</span>
+        <span class="text-green-800">http — SimpleHTTP (nothing useful)</span>
+      </div>
+      <div class="port-row">
+        <span class="port-closed">9000/tcp</span>
+        <span class="badge badge-yellow">OPEN</span>
+        <span class="text-green-800">unknown — ???</span>
+      </div>
+      <div class="port-row" style="border:1px solid #1a3a1a; padding:8px; border-radius:3px; margin-top:4px">
+        <span class="port-highlight">????/tcp</span>
+        <span class="badge" style="border-color:#00ff41; color:#00ff41">OPEN</span>
+        <span class="text-green-500">http — internal-api <span class="text-green-700">// interesting — same host, hidden path</span></span>
+      </div>
+    `;
+    console.log('%c[STAGE 3] There is an internal service path on this host. What sub-paths exist?', 'color:#005500; font-size:10px');
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  STAGE 4 — FETCH / SSRF
+// ═══════════════════════════════════════════════════════════════
+async function doFetch() {
+  const url = document.getElementById('fetch-url').value.trim();
+  const out = document.getElementById('fetch-out');
+  if (!url) { out.textContent = '> No URL provided.'; return; }
+
+  out.textContent = '> Sending request to: ' + url + '\n> Please wait...';
+  try {
+    const r = await fetch('/fetch?url=' + encodeURIComponent(url), { credentials: 'include' });
+    const d = await r.json();
+    typeOut(out, JSON.stringify(d, null, 2), 8);
+  } catch(e) {
+    out.textContent = '> Error: ' + e.message;
+  }
+}
+
+function fetchFake() {
+  const out = document.getElementById('fetch-out');
+  typeOut(out, '> Scanning internal network...\n> Access denied: internal network is restricted.\n> (or is it?)', 14);
+  console.log('%c[DEBUG] The /fetch endpoint passes URLs directly to requests.get(). No validation.', 'color:#005500; font-size:10px');
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  STAGE 5 — JWT
+// ═══════════════════════════════════════════════════════════════
+async function getToken() {
+  const rawOut    = document.getElementById('jwt-raw-out');
+  const visual    = document.getElementById('jwt-visual');
+  const visualCard = document.getElementById('jwt-visual-card');
+
+  rawOut.textContent = '> Requesting token...';
+  try {
+    const r = await fetch('/api/token', { credentials: 'include' });
+    const d = await r.json();
+    const token = d.token;
+    localStorage.setItem('ctf_jwt', token);
+
+    typeOut(rawOut, JSON.stringify(d, null, 2), 8);
+
+    // Colorize JWT parts
+    const parts = token.split('.');
+    if (parts.length === 3) {
+      visual.innerHTML =
+        `<span class="jwt-header">${parts[0]}</span>` +
+        `<span class="text-green-800">.</span>` +
+        `<span class="jwt-payload">${parts[1]}</span>` +
+        `<span class="text-green-800">.</span>` +
+        `<span class="jwt-sig">${parts[2]}</span>`;
+      visualCard.style.display = 'block';
+
+      // Decode payload for console
+      try {
+        const payload = JSON.parse(atob(parts[1]));
+        console.log('%c[STAGE 5] JWT payload:', 'color:#ffd93d', payload);
+        console.log('%c[STAGE 5] The role is "user". What if it were "admin"?', 'color:#005500; font-size:10px');
+        console.log('%c[STAGE 5] The algorithm is HS256. The secret is short.', 'color:#005500; font-size:10px');
+        console.log('%c[STAGE 5] Some JWT libraries accept alg:none — no signature required.', 'color:#005500; font-size:10px');
+      } catch(_) {}
+    }
+
+    document.getElementById('jwt-verify-input').value = token;
+  } catch(e) {
+    rawOut.textContent = '> Error: ' + e.message;
+  }
+}
+
+async function verifyToken() {
+  const token = document.getElementById('jwt-verify-input').value.trim();
+  const out   = document.getElementById('jwt-verify-out');
+  if (!token) { out.textContent = '> No token provided.'; return; }
+
+  out.textContent = '> Verifying...';
+  try {
+    const r = await fetch('/api/verify', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': 'Bearer ' + token
+      },
+      credentials: 'include'
+    });
+    const d = await r.json();
+    typeOut(out, JSON.stringify(d, null, 2), 10);
+  } catch(e) {
+    out.textContent = '> Error: ' + e.message;
+  }
+}
+
+function fakeVerify() {
+  const out = document.getElementById('jwt-verify-out');
+  typeOut(out, '> Verifying admin access...\n> {"status":"Access denied","role":"user"}\n> Hint: The role needs to be elevated.', 14);
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  STAGE 6 — FINAL
+// ═══════════════════════════════════════════════════════════════
+function fakeFlagReveal() {
+  const out = document.getElementById('final-out');
+  typeOut(out, '> Revealing flag...\n> HW{fake_flag}\n> Nice try. The real flag requires proper exploitation.', 14);
+}
+
+async function fakeFinalTest() {
+  const out = document.getElementById('final-out');
+  out.textContent = '> Trying /final-test...';
+  try {
+    const r = await fetch('/final-test', { credentials: 'include' });
+    const d = await r.json();
+    typeOut(out, JSON.stringify(d, null, 2), 10);
+  } catch(e) {
+    out.textContent = '> Error: ' + e.message;
+  }
+}
+
+async function tryFinalReal() {
+  const out = document.getElementById('final-out');
+  // This will fail — correct request must be crafted in Burp Suite
+  out.textContent = '> Attempting /final with current session...\n> (This will likely fail — craft the request manually in Burp Suite)';
+  try {
+    const token = localStorage.getItem('ctf_jwt') || '';
+    const r = await fetch('/final', {
+      method: 'GET', // Wrong method — intentional
+      headers: {
+        'Authorization': 'Bearer ' + token
+      },
+      credentials: 'include'
+    });
+    const d = await r.json();
+    typeOut(out, JSON.stringify(d, null, 2), 10);
+    console.log('%c[STAGE 6] Wrong method. Think about what Burp Suite can change.', 'color:#005500; font-size:10px');
+    console.log('%c[STAGE 6] Required: PUT method, X-Forwarded-For: 127.0.0.1, X-Admin: true, role=admin cookie, admin JWT', 'color:#005500; font-size:10px');
+  } catch(e) {
+    out.textContent = '> Error: ' + e.message;
+  }
+}
+
+// ── Boot sequence ────────────────────────────────────────────────
+(function boot() {
+  const bootLines = [
+    'BIOS v2.4.1 ... OK',
+    'Loading kernel modules ... OK',
+    'Mounting filesystems ... OK',
+    'Starting network services ... OK',
+    'CTF challenge initialized.',
+    'Good luck, hacker.',
+  ];
+  let i = 0;
+  const out = document.getElementById('login-out');
+  out.textContent = '';
+  const iv = setInterval(() => {
+    if (i < bootLines.length) {
+      out.textContent += '> ' + bootLines[i++] + '\n';
+    } else {
+      clearInterval(iv);
+      out.textContent += '\nAwaiting credentials...';
+    }
+  }, 200);
+})();
+</script>
+</html>
